@@ -1,0 +1,49 @@
+name: Deploy PR to Prod
+
+on:
+    push:
+      branches:
+        - release
+      paths:
+        - force-app/**
+       
+jobs:
+  deploy-pr-to-prod:
+
+    runs-on: ubuntu-latest
+   
+    container:
+      image: salesforce/cli:latest-slim
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install sfdx-git-delta
+        run: |
+          echo "y" | sfdx plugins:install sfdx-git-delta
+          git config --global --add safe.directory /__w/sfdc-cf/sfdc-cf
+
+      - name: Authenticate using SFDX_AUTH_URL
+        run: >
+          echo ${{ secrets.SFDX_PROD_AUTH }} | sf org login sfdx-url -s -u
+     
+      - name: Check changes
+        run: |
+          mkdir ./delta_source
+          sfdx sgd:source:delta --to "HEAD" --from "HEAD~1" -o ./delta_source --generate-delta -d -s force-app/
+     
+      - name: Show package.xml
+        run: |
+            echo "changes to deploy:"
+            cat ./delta_source/package/package.xml
+            echo "destructive changes:"
+            cat ./delta_source/destructiveChanges/destructiveChanges.xml
+   
+      - name: Deploy to prod
+        run: sf project deploy start --manifest ./delta_source/package/package.xml --test-level RunLocalTests --ignore-conflicts --wait 1000
