@@ -1,0 +1,59 @@
+name: Validate PR on Release
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+    branches:
+      - release
+    paths:
+      - force-app/**
+
+jobs:
+  validate-pr-to-production:
+
+    runs-on: ubuntu-latest
+   
+    container:
+      image: salesforce/cli:latest-slim
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install sfdx-git-delta
+        run: |
+          echo "y" | sfdx plugins:install sfdx-git-delta
+          git config --global --add safe.directory /__w/sfdc-cf/sfdc-cf
+   
+      - name: Authenticate using SFDX_AUTH_URL
+        run: >
+          echo ${{ secrets.SFDX_PROD_AUTH }} | sf org login sfdx-url -s -u
+     
+      - name: Check changes
+        run: |
+          mkdir ./delta_source
+          sfdx sgd:source:delta --to "HEAD" --from "HEAD~1" -o ./delta_source --generate-delta -d -s force-app/
+     
+      - name: Show package.xml
+        run: cat ./delta_source/package/package.xml
+
+      - name: Verify changes
+        run: |
+          if [ -d "./delta_source/force-app" ]; then
+            echo "Changes found"
+            ls -l ./delta_source/force-app/*
+          else
+            echo "No changes identified to be validated"
+            exit 0
+          fi
+
+      - name: Run action
+        run: |
+          echo "Running deployment validation"
+          sf project deploy validate --source-dir "./delta_source/force-app/" --wait 1000 --verbose --test-level RunLocalTests
